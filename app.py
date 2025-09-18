@@ -1,131 +1,117 @@
-from flask import Flask, render_template, request, jsonify
+import os
+from flask import Flask, request, jsonify
 import pandas as pd
 import joblib
 from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 from sklearn.preprocessing import LabelEncoder
-import os
 
 app = Flask(__name__)
 
-# Model file paths
+# Model paths
 RF_MODEL_PATH = "fraud_model_rf.pkl"
 XGB_MODEL_PATH = "fraud_model_xgb.pkl"
+ENCODER_PATH = "label_encoder.pkl"
 
-# Load models if exist
+# Load models if they exist
 rf_model = joblib.load(RF_MODEL_PATH) if os.path.exists(RF_MODEL_PATH) else None
 xgb_model = joblib.load(XGB_MODEL_PATH) if os.path.exists(XGB_MODEL_PATH) else None
+le = joblib.load(ENCODER_PATH) if os.path.exists(ENCODER_PATH) else None
 
-# ---------- Train and save models ----------
+# ---------- Train and Save ----------
 def train_and_save_models(df):
+    global rf_model, xgb_model, le
     try:
-        data = df.copy()
+        if "herb_type" not in df.columns or "Fraud" not in df.columns:
+            return "Dataset must contain 'herb_type' and 'Fraud' columns"
 
-        if 'herb_type' in data.columns:
-            le = LabelEncoder()
-            data['herb_type'] = le.fit_transform(data['herb_type'])
+        df_copy = df.copy()
 
-        if 'Fraud' not in data.columns:
-            raise ValueError("CSV must have 'Fraud' column")
+        # Encode herb_type
+        le = LabelEncoder()
+        df_copy["herb_type"] = le.fit_transform(df_copy["herb_type"])
+        joblib.dump(le, ENCODER_PATH)
 
-        X = data.drop('Fraud', axis=1)
-        y = data['Fraud']
+        X = df_copy.drop("Fraud", axis=1)
+        y = df_copy["Fraud"]
 
-        rf = RandomForestClassifier(n_estimators=100, random_state=42)
-        rf.fit(X, y)
+        rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
+        rf_model.fit(X, y)
 
-        xgb = XGBClassifier(use_label_encoder=False, eval_metric='logloss')
-        xgb.fit(X, y)
+        xgb_model = XGBClassifier(use_label_encoder=False, eval_metric="logloss")
+        xgb_model.fit(X, y)
 
-        joblib.dump(rf, RF_MODEL_PATH)
-        joblib.dump(xgb, XGB_MODEL_PATH)
+        joblib.dump(rf_model, RF_MODEL_PATH)
+        joblib.dump(xgb_model, XGB_MODEL_PATH)
 
-        return "Models retrained and saved successfully!"
+        return "Models trained and saved successfully!"
     except Exception as e:
-        return f"Error during retraining: {e}"
+        return f"Error during training: {e}"
 
-# ---------- Routes ----------
-@app.route('/')
+
+# ---------- API ----------
+@app.route("/")
 def home():
-    return render_template('index.html')
+    return jsonify({"message": "Fraud Detection API is running!"})
 
-@app.route('/retrain_page')
-def retrain_page():
-    return render_template('retrain.html')
 
-@app.route('/predict', methods=['POST'])
+@app.route("/predict", methods=["POST"])
 def predict():
-    global rf_model, xgb_model
+    global rf_model, xgb_model, le
+    if rf_model is None or xgb_model is None or le is None:
+        return jsonify({"result": "Models not trained yet. Call /retrain first."}), 400
+
     try:
-        data = request.form
-        herb_type = data['herb_type'].strip()
-        quality_score = float(data['quality_score'])
-        moisture_level = float(data['moisture_level'])
-        stock_before = float(data['stock_before'])
-        stock_after = float(data['stock_after'])
-        amount = float(data['amount'])
+        data = request.get_json()
+        required = ["herb_type", "quality_score", "moisture_level", "stock_before", "stock_after", "amount"]
+        if not all(k in data for k in required):
+            return jsonify({"result": "Missing fields"}), 400
 
-        if rf_model is None or xgb_model is None:
-            return jsonify({'result': "No model found. Please retrain first."})
+        # Manual fraud rules
+        if float(data["quality_score"]) > 10:
+            return jsonify({"result": "Fraud Detected (Quality Score too high)"})
+        if float(data["moisture_level"]) > 10:
+            return jsonify({"result": "Fraud Detected (Moisture too high)"})
+        if float(data["stock_after"]) > float(data["stock_before"]):
+            return jsonify({"result": "Fraud Detected (Stock inconsistency)"})
+        if float(data["amount"]) > 100000:
+            return jsonify({"result": "Fraud Detected (Suspicious Amount)"})
 
-        # ---------- Manual Fraud Rules ----------
-        def check_rules(quality_score, moisture_level, stock_before, stock_after, amount):
-            if quality_score > 10:
-                return "Fraud Detected (Quality Score too high)"
-            if moisture_level > 10:
-                return "Fraud Detected (Moisture too high)"
-            if stock_after > stock_before:
-                return "Fraud Detected (Stock inconsistency)"
-            if amount > 100000:
-                return "Fraud Detected (Suspicious Amount)"
-            return None
-
-        rule_result = check_rules(quality_score, moisture_level, stock_before, stock_after, amount)
-        if rule_result:
-            return jsonify({'result': rule_result})
-
-        # ---------- Handle herb_type ----------
+        # Encode herb_type
         try:
-            le = LabelEncoder()
-            le.fit(rf_model.feature_names_in_[:1])  # first column is herb_type
-            herb_encoded = le.transform([herb_type])[0]
+            herb_encoded = le.transform([data["herb_type"]])[0]
         except ValueError:
-            return jsonify({'result': "Fraud Detected (Unknown Herb Type)"})
+            return jsonify({"result": "Fraud Detected (Unknown Herb Type)"})
 
-        input_data = pd.DataFrame([[herb_encoded, quality_score, moisture_level, stock_before, stock_after, amount]],
-                                  columns=['herb_type', 'quality_score', 'moisture_level', 'stock_before', 'stock_after', 'amount'])
+        input_df = pd.DataFrame([[herb_encoded, float(data["quality_score"]), float(data["moisture_level"]),
+                                  float(data["stock_before"]), float(data["stock_after"]), float(data["amount"])]],
+                                columns=["herb_type", "quality_score", "moisture_level", "stock_before", "stock_after", "amount"])
 
-        rf_pred = rf_model.predict(input_data)[0]
-        xgb_pred = xgb_model.predict(input_data)[0]
+        rf_pred = rf_model.predict(input_df)[0]
+        xgb_pred = xgb_model.predict(input_df)[0]
 
-        final_result = "Fraud Detected" if (rf_pred == 1 or xgb_pred == 1) else "Safe Transaction"
-
-        return jsonify({'result': final_result})
+        result = "Fraud Detected" if rf_pred == 1 or xgb_pred == 1 else "Safe Transaction"
+        return jsonify({"result": result})
 
     except Exception as e:
-        return jsonify({'result': f"Error: {e}"})
+        return jsonify({"result": f"Error: {e}"}), 500
 
-@app.route('/retrain', methods=['POST'])
+
+@app.route("/retrain", methods=["POST"])
 def retrain():
-    global rf_model, xgb_model
     try:
-        if 'dataset' not in request.files:
-            return jsonify({'status': 'error', 'message': 'No file uploaded'})
+        data = request.get_json()
+        if "dataset" not in data:
+            return jsonify({"status": "error", "message": "No dataset provided"}), 400
 
-        file = request.files['dataset']
-        df = pd.read_csv(file)
-
+        df = pd.DataFrame(data["dataset"])
         message = train_and_save_models(df)
-
-        # Reload models after retraining
-        rf_model = joblib.load(RF_MODEL_PATH)
-        xgb_model = joblib.load(XGB_MODEL_PATH)
-
-        return jsonify({'status': 'success', 'message': message})
+        return jsonify({"status": "success", "message": message})
 
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f"Error during retraining: {e}"})
+        return jsonify({"status": "error", "message": f"Error during retraining: {e}"}), 500
 
 
-if __name__ == '__main__':
-    app.run(debug=True)
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
