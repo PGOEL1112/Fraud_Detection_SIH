@@ -47,7 +47,7 @@ df = pd.DataFrame(data)
 print("Large dataset with 1000 rows created successfully!")
 print(df.head())
 
-# ✅ Save the CSV file
+# ✅ Save the CSV filep
 df.to_csv("herbal_transactions_1000.csv", index=False)
 
 print("CSV file 'herbal_transactions_1000.csv' created successfully!")

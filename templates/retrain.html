@@ -12,7 +12,7 @@
 
     <section class="card">
         <h2>Upload Dataset (CSV)</h2>
-        <form id="retrainForm" enctype="multipart/form-data">
+        <form id="retrainForm" action="/retrain" method="POST" enctype="multipart/form-data">
             <input type="file" name="dataset" accept=".csv" required>
             <button type="submit" class="btn-primary">Retrain Model</button>
         </form>
