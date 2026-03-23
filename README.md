@@ -105,7 +105,6 @@ fraud_detection/
 
 ## ⭐ Future Improvements
 
-* Deploy on cloud (Render / AWS)
 * Add authentication system
 * Improve dataset with real-world data
 * Add advanced ML models
