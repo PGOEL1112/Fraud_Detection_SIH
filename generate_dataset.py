@@ -27,8 +27,16 @@ for _ in range(1000):
     # Fraud rules for simulation
     # 1 = Fraud, 0 = Safe
     # Conditions: high quality (>10), large stock difference, very high amount
-    fraud_flag = 1 if q_score > 10 or (sb - sa) > 5 or amt > 15000 else 0
+    prob = 0
 
+    if q_score > 10:
+        prob += 0.4
+    if (sb - sa) > 5:
+        prob += 0.3
+    if amt > 15000:
+        prob += 0.3
+
+    fraud_flag = 1 if random.random() < prob else 0
     # Append to dictionary
     data["herb_type"].append(herb)
     data["quality_score"].append(q_score)

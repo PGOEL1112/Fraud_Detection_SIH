@@ -13,6 +13,7 @@ app.config['DEBUG'] = True
 # Paths
 rf_model_path = "fraud_model_rf.pkl"
 xgb_model_path = "fraud_model_xgb.pkl"
+encoder_path = "label_encoder.pkl"
 csv_dataset_path = "herbal_transactions_1000.csv"  # auto-retrain if exists
 
 rf_model = None
@@ -23,11 +24,13 @@ def train_and_save_models(df):
     global rf_model, xgb_model
     try:
         data = df.copy()
-        if 'herb_type' in data.columns:
-            le = LabelEncoder()
-            data['herb_type'] = le.fit_transform(data['herb_type'])
+
         if 'Fraud' not in data.columns:
             raise ValueError("'Fraud' column not found in dataset.")
+
+        le = LabelEncoder()
+        data['herb_type'] = le.fit_transform(data['herb_type'])
+        joblib.dump(le, encoder_path)
 
         X = data.drop('Fraud', axis=1)
         y = data['Fraud']
@@ -49,14 +52,20 @@ def train_and_save_models(df):
         return f"❌ Error during retraining: {e}"
 
 # ---------- Auto retrain ----------
-if os.path.exists(csv_dataset_path):
+if os.path.exists(rf_model_path) and os.path.exists(xgb_model_path) and os.path.exists(encoder_path):
     try:
+        rf_model = joblib.load(rf_model_path)
+        xgb_model = joblib.load(xgb_model_path)
+        print("✅ Models loaded successfully!")
+
+    except Exception as e:
+        print(f"❌ Loading failed: {e}")
+else:
+    if os.path.exists(csv_dataset_path):
         df = pd.read_csv(csv_dataset_path)
         print(train_and_save_models(df))
-    except Exception as e:
-        print(f"❌ Auto retrain failed: {e}")
-else:
-    print("⚠ CSV dataset not found. Upload manually via /retrain_page.")
+    else:
+        print("⚠ CSV dataset not found. Upload manually via /retrain_page.")
 
 # ---------- Routes ----------
 @app.route('/')
@@ -103,8 +112,7 @@ def api_predict():
             return jsonify({"status":"error", "result":"❌ Invalid input", "details": errors}), 400
 
         # ---------- Encode herb correctly ----------
-        le = LabelEncoder()
-        le.fit(valid_herbs)
+        le = joblib.load(encoder_path)
         herb_encoded = le.transform([herb_type])[0]
 
         input_data = pd.DataFrame([[herb_encoded, quality_score, moisture_level,
