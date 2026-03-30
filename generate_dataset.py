@@ -36,7 +36,12 @@ for _ in range(1000):
     if amt > 15000:
         prob += 0.3
 
+    prob = min(prob, 1)
     fraud_flag = 1 if random.random() < prob else 0
+
+    # add noise (real-world simulation)
+    if random.random() < 0.05:
+        fraud_flag = 1 - fraud_flag
     # Append to dictionary
     data["herb_type"].append(herb)
     data["quality_score"].append(q_score)

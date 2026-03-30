@@ -11,9 +11,9 @@ app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.config['DEBUG'] = True
 
 # Paths
-rf_model_path = "fraud_model_rf.pkl"
-xgb_model_path = "fraud_model_xgb.pkl"
-encoder_path = "label_encoder.pkl"
+rf_model_path = "models/fraud_model_rf.pkl"
+xgb_model_path = "models/fraud_model_xgb.pkl"
+encoder_path = "models/label_encoder.pkl"
 csv_dataset_path = "herbal_transactions_1000.csv"  # auto-retrain if exists
 
 rf_model = None
@@ -23,6 +23,7 @@ xgb_model = None
 def train_and_save_models(df):
     global rf_model, xgb_model
     try:
+        os.makedirs("models", exist_ok=True)
         data = df.copy()
 
         if 'Fraud' not in data.columns:
@@ -78,7 +79,10 @@ def retrain_page():
 
 # ---------- Prediction ----------
 # Load valid herbs from training CSV
-valid_herbs = pd.read_csv(csv_dataset_path)['herb_type'].unique().tolist() if os.path.exists(csv_dataset_path) else []
+if os.path.exists(csv_dataset_path):
+    valid_herbs = pd.read_csv(csv_dataset_path)['herb_type'].unique().tolist()
+else:
+    valid_herbs = ['Amla','Ashwagandha','Tulsi','Neem','Giloy','Triphala','Shatavari','Brahmi']
 
 @app.route('/api/predict', methods=['POST'])
 def api_predict():
