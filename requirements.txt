@@ -5,3 +5,6 @@ xgboost
 joblib
 gunicorn
 pymongo
+numpy
+python-dotenv
+reportlab
