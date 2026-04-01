@@ -95,7 +95,13 @@ def api_predict():
         data = request.get_json()
 
         # ---------- Read inputs ----------
-        user_email = data.get("email", "guest")
+        user_email = data.get("email")
+
+        if not user_email:
+            return jsonify({
+                "status": "error",
+                "result": "❌ Login required"
+            }), 401
         herb_type = str(data.get('herb_type', '')).strip()
         quality_score = float(data.get('quality_score', 0))
         moisture_level = float(data.get('moisture_level', 0))

@@ -1,73 +1,78 @@
 // 🔐 AUTH STATE
 let currentUser = null;
+let safeCount = 0;
+let fraudCount = 0;
 
-// Listen auth state
+let pieChart, barChart, confidenceChart;
+let confidenceData = [];
+let labels = [];
+
 document.addEventListener("DOMContentLoaded", () => {
+    // 🔐 AUTH STATE
+    auth.onAuthStateChanged(async (user) => {
 
-    auth.onAuthStateChanged((user) => {
+        const tbody = document.querySelector("#historyTable tbody");
         if (user) {
             currentUser = user;
+
             document.getElementById("loginBtn").style.display = "none";
             document.getElementById("logoutBtn").style.display = "inline-block";
             document.getElementById("userInfo").innerText = "👤 " + user.email;
+
+            // 🔥 LOAD USER DATA FROM DB
+            const res = await fetch("/api/my_data", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ email: user.email })
+            });
+
+            const data = await res.json();
+
+            tbody.innerHTML = ""; // Clear existing data
+
+            if (data.status === "success") {
+                data.data.forEach(item => {
+                    const row = document.createElement("tr");
+                    row.innerHTML = `
+                        <td>${item.herb_type}</td>
+                        <td>${item.quality_score}</td>
+                        <td>${item.moisture_level}</td>
+                        <td>${item.stock_before}</td>
+                        <td>${item.stock_after}</td>
+                        <td>${item.amount}</td>
+                        <td>${item.result}</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+
+                recalculateStats(); // 🔥 important
+            }
+
         } else {
             currentUser = null;
+
             document.getElementById("loginBtn").style.display = "inline-block";
             document.getElementById("logoutBtn").style.display = "none";
             document.getElementById("userInfo").innerText = "";
+
+            tbody.innerHTML = ""; // Clear table
+            safeCount = 0;
+            fraudCount = 0;
+            updateUIStats();
         }
     });
 
-});
-
-
-document.addEventListener("DOMContentLoaded", () => {
-
+    // 🔐 LOGIN
     document.getElementById("loginBtn").addEventListener("click", async () => {
         const provider = new firebase.auth.GoogleAuthProvider();
-        try {
-            await auth.signInWithPopup(provider);
-        } catch (err) {
-            alert(err.message);
-        }
+        await auth.signInWithPopup(provider);
     });
 
+    // 🔐 LOGOUT
     document.getElementById("logoutBtn").addEventListener("click", () => {
         auth.signOut();
     });
 
-});
-
-function recalculateStats() {
-    const rows = document.querySelectorAll("#historyTable tbody tr");
-
-    safeCount = 0;
-    fraudCount = 0;
-
-    rows.forEach(row => {
-        const resultText = row.cells[6].innerText.toLowerCase();
-
-        if (resultText.includes("fraud")) {
-            fraudCount++;
-        } else {
-            safeCount++;
-        }
-    });
-
-    const total = safeCount + fraudCount;
-
-    document.getElementById("totalCount").textContent = total;
-    document.getElementById("safeCount").textContent = safeCount;
-    document.getElementById("fraudCount").textContent = fraudCount;
-
-    const percent = total > 0 ? ((fraudCount / total) * 100).toFixed(1) : 0;
-    document.getElementById("fraudPercent").textContent = percent + "%";
-
-    updatePieChart();
-    updateBarChart();
-}
-
-document.addEventListener("DOMContentLoaded", function () {
 
     // ---------- Prediction ----------
     const predictForm = document.getElementById("predictForm");
@@ -75,18 +80,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const predictText = document.getElementById("predictText");
     const nextPredictionBtn = document.getElementById("nextPredictionBtn");
     const historyTableBody = document.querySelector("#historyTable tbody");
-    const savedHistory = localStorage.getItem("historyTable");
-    if (savedHistory) {
-        historyTableBody.innerHTML = savedHistory;
-        recalculateStats();
-    }
-    let safeCount = 0;
-    let fraudCount = 0;
-    let pieChart;
-    let barChart;
-    let confidenceChart;
-    let confidenceData = [];
-    let labels = [];
+    
 
     predictForm?.addEventListener("submit", function (e) {
         // ❌ Block if not logged in
@@ -117,28 +111,6 @@ document.addEventListener("DOMContentLoaded", function () {
                 if (data.status === "success") {
                     const result = data.result;
 
-                    // Update counts
-                    if (result.toLowerCase().includes("fraud")) fraudCount++;
-                    else safeCount++;
-
-                    const total = safeCount + fraudCount;
-                    document.getElementById("totalCount").textContent = total;
-                    document.getElementById("safeCount").textContent = safeCount;
-                    document.getElementById("fraudCount").textContent = fraudCount;
-
-                    const percent = total > 0 ? ((fraudCount / total) * 100).toFixed(1) : 0;
-                    document.getElementById("fraudPercent").textContent = percent + "%";
-
-                    // ---------- Confidence tracking ----------
-                    confidenceData.push(data.confidence);
-                    labels.push("T" + (labels.length + 1));
-
-                    // limit size (last 10)
-                    if (confidenceData.length > 10) {
-                        confidenceData.shift();
-                        labels.shift();
-                    }
-
                     // Show result with reasons
                     predictText.innerHTML = `
                     ${result} <br>
@@ -151,17 +123,9 @@ document.addEventListener("DOMContentLoaded", function () {
                         predictText.innerHTML += `<br>⚠ Reason: ${data.reasons.join(", ")}`;
                     }
                     predictMessage.style.display = "block";
-                    predictMessage.classList.remove("safe", "fraud");
-
-                    if (result.toLowerCase().includes("fraud")) {
-                        predictMessage.classList.add("fraud");
-                    } else {
-                        predictMessage.classList.add("safe");
-                    }
-
-                    updatePieChart();                 
-                    updateBarChart();
-                    updateConfidenceChart();
+                    
+                    predictMessage.className = "prediction-card " +
+                        (result.toLowerCase().includes("fraud") ? "fraud" : "safe");
 
                     // Add to history table
                     const row = document.createElement("tr");
@@ -175,119 +139,32 @@ document.addEventListener("DOMContentLoaded", function () {
                     <td>${result}${data.reasons && data.reasons.length > 0 ? "<br><small>⚠ " + data.reasons.join(", ") + "</small>" : ""}</td>
                 `;
                     historyTableBody.prepend(row);
-                    localStorage.setItem("historyTable", historyTableBody.innerHTML);
-                    Array.from(predictForm.elements).forEach(el => el.disabled = true);
+
+                    recalculateStats(); 
+                    confidenceData.push(data.confidence);
+                    labels.push(`Tx ${labels.length + 1}`);
+
+                    if(confidenceData.length > 10) {
+                        confidenceData.shift();
+                        labels.shift();
+                    }
+
+                    updateConfidenceChart();
+                    predictForm.reset();
 
                 } else {
-                    // Show validation errors nicely
-                    if (data.details) {
-                        predictText.textContent = "❌ Invalid Input: " + data.details.join(", ");
-                        predictMessage.style.display = "block";
-                    } else {
-                        alert("Error: " + data.result);
+                      alert("Error: " + data.result);
                     }
-                }
             })
             .catch(err => alert("Prediction error: " + err));
     });
 
-    nextPredictionBtn?.addEventListener("click", function () {
-        predictMessage.style.display = "none";
-        predictText.textContent = "";
-        predictForm.reset();
-        Array.from(predictForm.elements).forEach(el => el.disabled = false);
-    });
-
-    // ---------- Pie Chart ----------
-    function updatePieChart() {
-        const ctx = document.getElementById('pieChart').getContext('2d');
-        const data = {
-            labels: ['Safe', 'Fraud'],
-            datasets: [{
-                label: 'Transactions',
-                data: [safeCount, fraudCount],
-                backgroundColor: ['#27ae60', '#c0392b'],
-            }]
-        };
-        const config = { type: 'pie', data, options: { responsive: true, plugins: { legend: { position: 'bottom' } } } };
-        if (pieChart) pieChart.destroy();
-        pieChart = new Chart(ctx, config);
-    }
-
-    window.uploadCSV = function () {
-        const fileInput = document.getElementById("bulkFile");
-        const file = fileInput.files[0];
-
-        if (!file) {
-            alert("Please select CSV file");
-            return;
-        }
-
-        const formData = new FormData();
-        formData.append("file", file);
-
-        fetch("/api/bulk_predict", {
-            method: "POST",
-            body: formData
-        })
-            .then(res => res.json())
-            .then(data => {
-                if (data.status === "success") {
-                    document.getElementById("bulkResult").innerText =
-                        `Fraud: ${data.fraud}, Safe: ${data.safe}`;
-                }
-            });
-    }
-
-    function updateBarChart() {
-        const ctx = document.getElementById('barChart').getContext('2d');
-
-        if (barChart) barChart.destroy();
-
-        barChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: ['Safe', 'Fraud'],
-                datasets: [{
-                    label: 'Transactions',
-                    data: [safeCount, fraudCount],
-                    backgroundColor: ['#27ae60', '#c0392b']
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: { display: false }
-                }
-            }
+    nextPredictionBtn.addEventListener("click", () => {
+            predictMessage.style.display = "none";
         });
-    }
 
-    function updateConfidenceChart() {
-        const ctx = document.getElementById('confidenceChart').getContext('2d');
 
-        if (confidenceChart) confidenceChart.destroy();
-
-        confidenceChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: 'Confidence %',
-                    data: confidenceData,
-                    borderColor: '#2980b9',
-                    fill: false,
-                    tension: 0.3
-                }]
-            },
-            options: {
-                responsive: true
-            }
-        });
-    }
-
-    // ---------- Retrain ----------
-    const retrainForm = document.getElementById("retrainForm");
+        const retrainForm = document.getElementById("retrainForm");
     const retrainMessage = document.getElementById("retrainMessage");
 
     retrainForm?.addEventListener("submit", function (e) {
@@ -305,5 +182,119 @@ document.addEventListener("DOMContentLoaded", function () {
                 retrainMessage.style.color = 'red';
             });
     });
-
 });
+
+    // ---------- STATS ----------
+function recalculateStats() {
+    const rows = document.querySelectorAll("#historyTable tbody tr");
+
+    safeCount = 0;
+    fraudCount = 0;
+
+    rows.forEach(row => {
+        const text = row.cells[row.cells.length - 1].innerText.toLowerCase();
+        if (text.includes("fraud")) fraudCount++;
+        else safeCount++;
+    });
+
+    updateUIStats();
+}
+
+function updateUIStats() {
+    const total = safeCount + fraudCount;
+
+    document.getElementById("totalCount").textContent = total;
+    document.getElementById("safeCount").textContent = safeCount;
+    document.getElementById("fraudCount").textContent = fraudCount;
+
+    const percent = total ? ((fraudCount / total) * 100).toFixed(1) : 0;
+    document.getElementById("fraudPercent").textContent = percent + "%";
+
+
+    if (safeCount === 0 && fraudCount === 0) {
+        document.getElementById("totalCount").textContent = 0;
+    }
+
+    updatePieChart();
+    updateBarChart();
+}
+
+
+// ---------- CHARTS ----------
+function updatePieChart() {
+    const ctx = document.getElementById("pieChart").getContext("2d");
+
+    if (pieChart) pieChart.destroy();
+
+    pieChart = new Chart(ctx, {
+        type: "pie",
+        data: {
+            labels: ["Safe", "Fraud"],
+            datasets: [{
+                data: [safeCount, fraudCount],
+                backgroundColor: ["#27ae60", "#c0392b"]
+            }]
+        }
+    });
+}
+
+function updateBarChart() {
+    const ctx = document.getElementById("barChart").getContext("2d");
+
+    if (barChart) barChart.destroy();
+
+    barChart = new Chart(ctx, {
+        type: "bar",
+        data: {
+            labels: ["Safe", "Fraud"],
+            datasets: [{
+                data: [safeCount, fraudCount],
+                backgroundColor: ["#27ae60", "#c0392b"]
+            }]
+        }
+    });
+}
+
+function updateConfidenceChart() {
+    const ctx = document.getElementById("confidenceChart").getContext("2d");
+
+    if (confidenceChart) confidenceChart.destroy();
+
+    confidenceChart = new Chart(ctx, {
+        type: "line",
+        data: {
+            labels: labels,
+            datasets: [{
+                label: "Confidence %",
+                data: confidenceData,
+                borderColor: "#2980b9",
+                fill: false
+            }]
+        }
+    });
+}
+
+
+// ---------- BULK CSV ----------
+function uploadCSV() {
+    const file = document.getElementById("bulkFile").files[0];
+
+    if (!file) {
+        alert("Upload CSV first");
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    fetch("/api/bulk_predict", {
+        method: "POST",
+        body: formData
+    })
+        .then(res => res.json())
+        .then(data => {
+            document.getElementById("bulkResult").innerText =
+                `Fraud: ${data.fraud}, Safe: ${data.safe}`;
+        });
+}
+
