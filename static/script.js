@@ -1,3 +1,72 @@
+// 🔐 AUTH STATE
+let currentUser = null;
+
+// Listen auth state
+document.addEventListener("DOMContentLoaded", () => {
+
+    auth.onAuthStateChanged((user) => {
+        if (user) {
+            currentUser = user;
+            document.getElementById("loginBtn").style.display = "none";
+            document.getElementById("logoutBtn").style.display = "inline-block";
+            document.getElementById("userInfo").innerText = "👤 " + user.email;
+        } else {
+            currentUser = null;
+            document.getElementById("loginBtn").style.display = "inline-block";
+            document.getElementById("logoutBtn").style.display = "none";
+            document.getElementById("userInfo").innerText = "";
+        }
+    });
+
+});
+
+
+document.addEventListener("DOMContentLoaded", () => {
+
+    document.getElementById("loginBtn").addEventListener("click", async () => {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        try {
+            await auth.signInWithPopup(provider);
+        } catch (err) {
+            alert(err.message);
+        }
+    });
+
+    document.getElementById("logoutBtn").addEventListener("click", () => {
+        auth.signOut();
+    });
+
+});
+
+function recalculateStats() {
+    const rows = document.querySelectorAll("#historyTable tbody tr");
+
+    safeCount = 0;
+    fraudCount = 0;
+
+    rows.forEach(row => {
+        const resultText = row.cells[6].innerText.toLowerCase();
+
+        if (resultText.includes("fraud")) {
+            fraudCount++;
+        } else {
+            safeCount++;
+        }
+    });
+
+    const total = safeCount + fraudCount;
+
+    document.getElementById("totalCount").textContent = total;
+    document.getElementById("safeCount").textContent = safeCount;
+    document.getElementById("fraudCount").textContent = fraudCount;
+
+    const percent = total > 0 ? ((fraudCount / total) * 100).toFixed(1) : 0;
+    document.getElementById("fraudPercent").textContent = percent + "%";
+
+    updatePieChart();
+    updateBarChart();
+}
+
 document.addEventListener("DOMContentLoaded", function () {
 
     // ---------- Prediction ----------
@@ -9,6 +78,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const savedHistory = localStorage.getItem("historyTable");
     if (savedHistory) {
         historyTableBody.innerHTML = savedHistory;
+        recalculateStats();
     }
     let safeCount = 0;
     let fraudCount = 0;
@@ -33,7 +103,8 @@ document.addEventListener("DOMContentLoaded", function () {
             moisture_level: formData.get("moisture_level"),
             stock_before: formData.get("stock_before"),
             stock_after: formData.get("stock_after"),
-            amount: formData.get("amount")
+            amount: formData.get("amount"),
+            email: currentUser.email,
         };
 
         fetch("/api/predict", {
@@ -233,47 +304,6 @@ document.addEventListener("DOMContentLoaded", function () {
                 retrainMessage.textContent = "❌ Error: " + err;
                 retrainMessage.style.color = 'red';
             });
-    });
-
-});
-
-
-// 🔐 AUTH STATE
-let currentUser = null;
-
-// Listen auth state
-document.addEventListener("DOMContentLoaded", () => {
-
-    auth.onAuthStateChanged((user) => {
-        if (user) {
-            currentUser = user;
-            document.getElementById("loginBtn").style.display = "none";
-            document.getElementById("logoutBtn").style.display = "inline-block";
-            document.getElementById("userInfo").innerText = "👤 " + user.email;
-        } else {
-            currentUser = null;
-            document.getElementById("loginBtn").style.display = "inline-block";
-            document.getElementById("logoutBtn").style.display = "none";
-            document.getElementById("userInfo").innerText = "";
-        }
-    });
-
-});
-
-
-document.addEventListener("DOMContentLoaded", () => {
-
-    document.getElementById("loginBtn").addEventListener("click", async () => {
-        const provider = new firebase.auth.GoogleAuthProvider();
-        try {
-            await auth.signInWithPopup(provider);
-        } catch (err) {
-            alert(err.message);
-        }
-    });
-
-    document.getElementById("logoutBtn").addEventListener("click", () => {
-        auth.signOut();
     });
 
 });
